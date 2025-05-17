@@ -57,7 +57,6 @@ func (c *NextflowContainer) GetContainerEvents(prometheusHost string) {
 			select {
 			case event := <-eventChan:
 				if event.Type == events.ContainerEventType {
-					// logrus.Infof("Received container event: Action=%s, ID=%s", event.Action, event.Actor.ID)
 
 					// Attempt to reopen the connection if it is nil
 					if conn == nil {
@@ -67,16 +66,13 @@ func (c *NextflowContainer) GetContainerEvents(prometheusHost string) {
 							continue
 						}
 					}
-
-					if conn != nil {
-						switch event.Action {
-						case "start":
-							logrus.Infof("Processing 'start' event for container ID: %s", event.Actor.ID)
-							processContainerEvent(conn, event, apiClient, re, &mu, processedStarts, containerPIDs, true)
-						case "die":
-							logrus.Infof("Processing 'die' event for container ID: %s", event.Actor.ID)
-							processContainerEvent(conn, event, apiClient, re, &mu, processedDies, containerPIDs, false)
-						}
+					switch event.Action {
+					case "start":
+						logrus.Infof("Processing 'start' event for container ID: %s", event.Actor.ID)
+						processContainerEvent(conn, event, apiClient, re, &mu, processedStarts, containerPIDs, true)
+					case "die":
+						logrus.Infof("Processing 'die' event for container ID: %s", event.Actor.ID)
+						processContainerEvent(conn, event, apiClient, re, &mu, processedDies, containerPIDs, false)
 					}
 				}
 			case err := <-errChan:
@@ -88,11 +84,7 @@ func (c *NextflowContainer) GetContainerEvents(prometheusHost string) {
 
 func openTCPConnection(prometheusHost string) (net.Conn, error) {
 	logrus.Infof("Opening TCP connection to %s...", prometheusHost)
-	conn, err := net.Dial("tcp", prometheusHost)
-	if err != nil {
-		logrus.Errorf("Failed to connect to Prometheus host: %v", err)
-		return nil, err
-	}
+	conn, _ := net.Dial("tcp", prometheusHost)
 	logrus.Info("TCP connection established successfully.")
 	return conn, nil
 }
@@ -110,30 +102,43 @@ func processContainerEvent(con net.Conn, event events.Message, apiClient *client
 	go func() {
 		containerInfo, err := apiClient.ContainerInspect(context.Background(), event.Actor.ID)
 		if err != nil {
-			logrus.Errorf("Error inspecting container %s: %v", event.Actor.ID, err)
+			logrus.Printf("Error inspecting container %s: %v", event.Actor.ID, err)
 			return
 		}
 
 		if len(containerInfo.Name) > 0 && re.MatchString(containerInfo.Name) {
-			eventType := "start"
+			eventType := "[STARTED]"
 			if !isStartEvent {
-				eventType = "die"
+				eventType = "[DIED]"
 			}
-			logrus.Infof("[%s] nextflow container: %s", strings.ToUpper(eventType), containerInfo.Name)
-
+			logrus.Infof("%s nextflow container: %s\n", eventType, containerInfo.Name)
 			pid := containerInfo.State.Pid
 			if !isStartEvent {
 				mu.Lock()
 				pid = containerPIDs[event.Actor.ID]
+				if pid == 0 {
+					logrus.Exit(1)
+				}
 				mu.Unlock()
 			}
 
 			nextflowContainer := createNextflowContainer(containerInfo, pid, eventType)
+			if nextflowContainer.PID == 0 {
+				logrus.Exit(1)
+			}
 
-			// if !isStartEvent { // Only send data for `die` events
-			logrus.Infof("Sending container data to server for container ID: %s", event.Actor.ID)
-			WriteToSocket(con, nextflowContainer)
-			// }
+			if isStartEvent {
+				mu.Lock()
+				containerPIDs[event.Actor.ID] = pid
+				mu.Unlock()
+				WriteToSocket(con, nextflowContainer)
+			} else {
+				mu.Lock()
+				containerPIDs[event.Actor.ID] = pid
+				mu.Unlock()
+				WriteToSocket(con, nextflowContainer)
+			}
+
 		} else {
 			logrus.Warnf("Container name does not match Nextflow pattern. Skipping container ID: %s", event.Actor.ID)
 		}
@@ -151,8 +156,6 @@ func WriteToSocket(con net.Conn, container NextflowContainer) {
 	logrus.Infof("Writing container data to socket for container ID: %s", container.ContainerID)
 	_, err = con.Write(jsonData)
 	if err != nil {
-		logrus.Errorf("Error writing to socket: %v", err)
-		logrus.Info("Attempting to reopen the connection...")
 
 		// Reopen the connection
 		newConn, connErr := openTCPConnection(con.RemoteAddr().String())
@@ -169,7 +172,6 @@ func WriteToSocket(con net.Conn, container NextflowContainer) {
 			return
 		}
 
-		logrus.Infof("Container data sent to socket successfully after reopening: %s", string(jsonData))
 	} else {
 		logrus.Infof("Container data sent to socket successfully: %s", string(jsonData))
 	}
@@ -199,33 +201,6 @@ func createNextflowContainer(containerInfo types.ContainerJSON, pid int, eventTy
 	}
 }
 
-// func manageConnectionTimer(conn *net.Conn, timeout time.Duration) chan struct{} {
-// 	resetChan := make(chan struct{})
-// 	timer := time.NewTimer(timeout)
-
-// 	go func() {
-// 		for {
-// 			select {
-// 			case <-timer.C:
-// 				// Timer expired, close the connection
-// 				if *conn != nil {
-// 					logrus.Info("Closing TCP connection due to inactivity...")
-// 					(*conn).Close()
-// 					*conn = nil
-// 				}
-// 			case <-resetChan:
-// 				// Reset the timer
-// 				if !timer.Stop() {
-// 					<-timer.C
-// 				}
-// 				timer.Reset(timeout)
-// 			}
-// 		}
-// 	}()
-
-// 	return resetChan
-// }
-
 func EscapeContainerName(containerName string) string {
 	// Remove the leading '/' if present
 	containerName = strings.TrimPrefix(containerName, "/")
@@ -236,8 +211,7 @@ func main() {
 	logrus.Info("Starting Monitoring Agent...")
 
 	// Prometheus host address
-	// prometheusHost := "130.149.248.100:42"
-	prometheusHost := "127.0.0.1:42"
+	prometheusHost := "130.149.248.100:42"
 
 	// Watch for container events
 	logrus.Info("Initializing container event watcher...")
