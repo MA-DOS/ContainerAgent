@@ -1,3 +1,10 @@
+## [1.0.1](https://github.com/MA-DOS/ContainerAgent/compare/v1.0.0...v1.0.1) (2025-05-17)
+
+
+### Bug Fixes
+
+* fix the semantic release pipeline ([9f97f26](https://github.com/MA-DOS/ContainerAgent/commit/9f97f26d6cd295286049115b4341dfd304cde589))
+
 # 1.0.0 (2025-05-17)
 
 
