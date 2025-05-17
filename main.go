@@ -1,5 +1,7 @@
 package main
 
+// Containerd agent to monitor Nextflow containers and send events to a Prometheus host.
+
 import (
 	"context"
 	"encoding/json"
