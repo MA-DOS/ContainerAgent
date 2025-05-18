@@ -21,6 +21,8 @@ import (
 // Regex to match Nextflow container names.
 var re = regexp.MustCompile(`^/nxf-[a-zA-Z0-9-]+$`)
 
+const staticPort = "42"
+
 type NextflowContainer struct {
 	WorkerIP       string    `json:"node"`
 	ContainerEvent string    `json:"event"`
@@ -85,8 +87,22 @@ func (c *NextflowContainer) GetContainerEvents(prometheusHost string) {
 }
 
 func openTCPConnection(prometheusHost string) (net.Conn, error) {
-	logrus.Infof("Opening TCP connection to %s...", prometheusHost)
-	conn, _ := net.Dial("tcp", prometheusHost)
+	logrus.Infof("Opening TCP connection to %s on static port %s...", prometheusHost, staticPort)
+	address := fmt.Sprintf("%s:%s", prometheusHost, staticPort)
+
+	// Use a Dialer to bind the client to a specific local port
+	dialer := &net.Dialer{
+		LocalAddr: &net.TCPAddr{
+			IP:   net.IPv4zero,
+			Port: 4242,
+		},
+	}
+
+	conn, err := dialer.Dial("tcp", address)
+	if err != nil {
+		logrus.Errorf("Failed to open TCP connection to %s: %v", address, err)
+		return nil, err
+	}
 	logrus.Info("TCP connection established successfully.")
 	return conn, nil
 }
@@ -213,7 +229,7 @@ func main() {
 	logrus.Info("Starting Monitoring Agent...")
 
 	// Prometheus host address
-	prometheusHost := "130.149.248.100:42"
+	prometheusHost := "130.149.248.100"
 
 	// Watch for container events
 	logrus.Info("Initializing container event watcher...")
