@@ -1,3 +1,10 @@
+## [1.0.2](https://github.com/MA-DOS/ContainerAgent/compare/v1.0.1...v1.0.2) (2025-05-18)
+
+
+### Bug Fixes
+
+* run tcp socket on static server and client-side ports ([abaadf2](https://github.com/MA-DOS/ContainerAgent/commit/abaadf22577c2536f6863395563962730ac5e66a))
+
 ## [1.0.1](https://github.com/MA-DOS/ContainerAgent/compare/v1.0.0...v1.0.1) (2025-05-17)
 
 
