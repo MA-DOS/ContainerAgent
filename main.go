@@ -73,10 +73,10 @@ func (c *NextflowContainer) GetContainerEvents(prometheusHost string) {
 					switch event.Action {
 					case "start":
 						logrus.Infof("Processing 'start' event for container ID: %s", event.Actor.ID)
-						processContainerEvent(conn, event, apiClient, re, &mu, processedStarts, containerPIDs, true)
+						processContainerEvent(conn, event, apiClient, re, &mu, processedStarts, containerPIDs, true, prometheusHost)
 					case "die":
 						logrus.Infof("Processing 'die' event for container ID: %s", event.Actor.ID)
-						processContainerEvent(conn, event, apiClient, re, &mu, processedDies, containerPIDs, false)
+						processContainerEvent(conn, event, apiClient, re, &mu, processedDies, containerPIDs, false, prometheusHost)
 					}
 				}
 			case err := <-errChan:
@@ -94,7 +94,7 @@ func openTCPConnection(prometheusHost string) (net.Conn, error) {
 	dialer := &net.Dialer{
 		LocalAddr: &net.TCPAddr{
 			IP:   net.IPv4zero,
-			Port: 4242,
+			Port: 0,
 		},
 	}
 
@@ -107,7 +107,7 @@ func openTCPConnection(prometheusHost string) (net.Conn, error) {
 	return conn, nil
 }
 
-func processContainerEvent(con net.Conn, event events.Message, apiClient *client.Client, re *regexp.Regexp, mu *sync.Mutex, processed map[string]bool, containerPIDs map[string]int, isStartEvent bool) {
+func processContainerEvent(con net.Conn, event events.Message, apiClient *client.Client, re *regexp.Regexp, mu *sync.Mutex, processed map[string]bool, containerPIDs map[string]int, isStartEvent bool, prometheusHost string) {
 	mu.Lock()
 	if processed[event.Actor.ID] {
 		logrus.Warnf("Event for container ID %s already processed. Skipping...", event.Actor.ID)
@@ -135,26 +135,26 @@ func processContainerEvent(con net.Conn, event events.Message, apiClient *client
 				mu.Lock()
 				pid = containerPIDs[event.Actor.ID]
 				if pid == 0 {
-					logrus.Exit(1)
+					logrus.Error("Container PID is zero.")
 				}
 				mu.Unlock()
 			}
 
 			nextflowContainer := createNextflowContainer(containerInfo, pid, eventType)
 			if nextflowContainer.PID == 0 {
-				logrus.Exit(1)
+				logrus.Error("Container PID is zero.")
 			}
 
 			if isStartEvent {
 				mu.Lock()
 				containerPIDs[event.Actor.ID] = pid
 				mu.Unlock()
-				WriteToSocket(con, nextflowContainer)
+				WriteToSocket(con, nextflowContainer, prometheusHost)
 			} else {
 				mu.Lock()
 				containerPIDs[event.Actor.ID] = pid
 				mu.Unlock()
-				WriteToSocket(con, nextflowContainer)
+				WriteToSocket(con, nextflowContainer, prometheusHost)
 			}
 
 		} else {
@@ -163,7 +163,7 @@ func processContainerEvent(con net.Conn, event events.Message, apiClient *client
 	}()
 }
 
-func WriteToSocket(con net.Conn, container NextflowContainer) {
+func WriteToSocket(con net.Conn, container NextflowContainer, prometheusHost string) {
 	logrus.Info("Serializing container data to JSON...")
 	jsonData, err := json.Marshal(container)
 	if err != nil {
@@ -174,14 +174,12 @@ func WriteToSocket(con net.Conn, container NextflowContainer) {
 	logrus.Infof("Writing container data to socket for container ID: %s", container.ContainerID)
 	_, err = con.Write(jsonData)
 	if err != nil {
-
-		// Reopen the connection
-		newConn, connErr := openTCPConnection(con.RemoteAddr().String())
+		// Reopen the connection using the correct host
+		newConn, connErr := openTCPConnection(prometheusHost)
 		if connErr != nil {
 			logrus.Errorf("Failed to reopen connection: %v", connErr)
 			return
 		}
-
 		// Retry writing to the new connection
 		logrus.Infof("Retrying to write container data to socket for container ID: %s", container.ContainerID)
 		_, err = newConn.Write(jsonData)
@@ -189,7 +187,6 @@ func WriteToSocket(con net.Conn, container NextflowContainer) {
 			logrus.Errorf("Error writing to reopened socket: %v", err)
 			return
 		}
-
 	} else {
 		logrus.Infof("Container data sent to socket successfully: %s", string(jsonData))
 	}
