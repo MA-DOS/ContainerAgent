@@ -1,3 +1,10 @@
+## [1.0.3](https://github.com/MA-DOS/ContainerAgent/compare/v1.0.2...v1.0.3) (2025-06-07)
+
+
+### Bug Fixes
+
+* tcp connection handling ([86d6938](https://github.com/MA-DOS/ContainerAgent/commit/86d69383f243bd7a6c41f770ecbe716a6507ef6e))
+
 ## [1.0.2](https://github.com/MA-DOS/ContainerAgent/compare/v1.0.1...v1.0.2) (2025-05-18)
 
 
